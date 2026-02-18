@@ -1,0 +1,116 @@
+--[[
+    Gemini Secure Fly (CFrame Mode)
+    Bypass: Velocity Reset + CFrame Manipulation (Não usa BodyMovers depreciados)
+    Noclip: Integrado para evitar fling
+    WalkSpeed: Intocado
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+-- Configurações
+local Settings = {
+    FlySpeed = 50, -- Velocidade do voo (Independente do WalkSpeed)
+    ToggleKey = Enum.KeyCode.F,
+    SafeMode = true -- Reseta velocidade para evitar detecção de queda
+}
+
+local State = {
+    Flying = false,
+    Keys = {W = false, A = false, S = false, D = false, Space = false, Ctrl = false}
+}
+
+-- Gerenciador de Input
+local function UpdateInput(input, bool)
+    if input.KeyCode == Enum.KeyCode.W then State.Keys.W = bool
+    elseif input.KeyCode == Enum.KeyCode.A then State.Keys.A = bool
+    elseif input.KeyCode == Enum.KeyCode.S then State.Keys.S = bool
+    elseif input.KeyCode == Enum.KeyCode.D then State.Keys.D = bool
+    elseif input.KeyCode == Enum.KeyCode.Space then State.Keys.Space = bool
+    elseif input.KeyCode == Enum.KeyCode.LeftControl then State.Keys.Ctrl = bool end
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Settings.ToggleKey then
+        State.Flying = not State.Flying
+        
+        local Char = LocalPlayer.Character
+        local Root = Char and Char:FindFirstChild("HumanoidRootPart")
+        
+        if not State.Flying and Root then
+            -- Previne dano de queda ao desativar
+            Root.AssemblyLinearVelocity = Vector3.zero
+            Workspace.Gravity = 196.2
+        end
+    else
+        UpdateInput(input, true)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    UpdateInput(input, false)
+end)
+
+-- Loop Principal (Heartbeat = Pós-Física)
+RunService.Heartbeat:Connect(function(deltaTime)
+    if not State.Flying then return end
+
+    local Char = LocalPlayer.Character
+    local Root = Char and Char:FindFirstChild("HumanoidRootPart")
+    local Hum = Char and Char:FindFirstChild("Humanoid")
+
+    if not Root or not Hum then return end
+
+    -- Bypass Básico: Zera a gravidade e velocidade física para enganar o servidor
+    Root.AssemblyLinearVelocity = Vector3.zero
+    Root.AssemblyAngularVelocity = Vector3.zero
+    
+    -- Se HumanoidState for necessário para animações, mantenha. Caso contrário:
+    -- Hum:ChangeState(Enum.HumanoidStateType.Physics) 
+
+    -- Cálculo de Direção CFrame
+    local MoveDir = Vector3.zero
+    local CamCF = Camera.CFrame
+    
+    if State.Keys.W then MoveDir = MoveDir + CamCF.LookVector end
+    if State.Keys.S then MoveDir = MoveDir - CamCF.LookVector end
+    if State.Keys.A then MoveDir = MoveDir - CamCF.RightVector end
+    if State.Keys.D then MoveDir = MoveDir + CamCF.RightVector end
+    if State.Keys.Space then MoveDir = MoveDir + Vector3.new(0, 1, 0) end
+    if State.Keys.Ctrl then MoveDir = MoveDir - Vector3.new(0, 1, 0) end
+
+    -- Aplicação de Movimento (CFrame não dispara checks de WalkSpeed)
+    if MoveDir.Magnitude > 0 then
+        -- Normaliza para velocidade constante em diagonais
+        local NewPos = Root.CFrame.Position + (MoveDir.Unit * Settings.FlySpeed * deltaTime)
+        
+        -- Mantém a rotação olhando para a câmera ou movimento
+        local NewRot = CFrame.lookAt(Vector3.zero, CamCF.LookVector)
+        
+        Root.CFrame = CFrame.new(NewPos) * NewRot.Rotation
+    else
+        -- Trava no ar
+        Root.CFrame = CFrame.new(Root.Position) * CFrame.lookAt(Vector3.zero, CamCF.LookVector).Rotation
+    end
+end)
+
+-- Noclip Loop (Stepped = Pré-Física)
+RunService.Stepped:Connect(function()
+    if State.Flying then
+        local Char = LocalPlayer.Character
+        if Char then
+            for _, part in pairs(Char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
