@@ -1,0 +1,312 @@
+local Players = game:GetService("Players")
+local UIS     = game:GetService("UserInputService")
+local VIM     = game:GetService("VirtualInputManager")
+local pg      = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+local CPS, running, picking, clickX, clickY, pickConn, lastTried = 20, false, false, nil, nil, nil, 100000
+
+-- FICHEIROS
+local function fread(f)    return (isfile and isfile(f) and readfile(f)) or "" end
+local function fwrite(f,d) if writefile then writefile(f,d) end end
+local function saveProgress(c) fwrite("xb_prog.txt",   tostring(c)) end
+local function loadProgress()  return tonumber(fread("xb_prog.txt")) end
+local function saveTarget(x,y) fwrite("xb_target.txt", x..","..y) end
+local function loadTarget()    local x,y=fread("xb_target.txt"):match("(%d+),(%d+)"); return tonumber(x),tonumber(y) end
+local function saveCode(c)     fwrite("xb_codes.txt",  fread("xb_codes.txt")..c.."\n") end
+local function getCodes()      local t={}; for l in fread("xb_codes.txt"):gmatch("[^\n]+") do t[#t+1]=l end; return t end
+
+Players.LocalPlayer.AncestryChanged:Connect(function()
+    if not Players.LocalPlayer:IsDescendantOf(game) then saveProgress(lastTried) end
+end)
+pcall(function() game:BindToClose(function() saveProgress(lastTried) end) end)
+
+-- UI HELPERS
+local G = Color3.fromRGB
+local function corner(p,r) local c=Instance.new("UICorner",p); c.CornerRadius=UDim.new(0,r or 6) end
+local function stroke(p,c,t) local s=Instance.new("UIStroke",p); s.Color=c or G(0,255,140); s.Thickness=t or 1.5 end
+local function frame(p,x,y,w,h,bg)
+    local f=Instance.new("Frame",p)
+    f.Position=UDim2.new(0,x,0,y); f.Size=UDim2.new(0,w,0,h)
+    f.BackgroundColor3=bg or G(12,12,18); f.BorderSizePixel=0; f.ZIndex=4
+    return f
+end
+local function label(p,txt,x,y,w,h,col,ts)
+    local l=Instance.new("TextLabel",p)
+    l.Text=txt; l.Position=UDim2.new(0,x,0,y); l.Size=UDim2.new(0,w,0,h)
+    l.BackgroundTransparency=1; l.TextColor3=col or G(200,200,200)
+    l.Font=Enum.Font.Code; l.TextSize=ts or 10
+    l.TextXAlignment=Enum.TextXAlignment.Left; l.ZIndex=5
+    return l
+end
+local function btn(p,txt,x,y,w,h,bg,tc)
+    local b=Instance.new("TextButton",p)
+    b.Text=txt; b.Position=UDim2.new(0,x,0,y); b.Size=UDim2.new(0,w,0,h)
+    b.BackgroundColor3=bg; b.TextColor3=tc
+    b.Font=Enum.Font.Code; b.TextSize=10; b.BorderSizePixel=0; b.ZIndex=5
+    corner(b,4); return b
+end
+
+-- SCREEN
+local Screen = Instance.new("ScreenGui",pg)
+Screen.Name="XBrute"; Screen.ResetOnSpawn=false; Screen.ZIndexBehavior=Enum.ZIndexBehavior.Global
+
+local Main = frame(Screen,0,0,255,295,G(16,16,20))
+Main.Position=UDim2.new(0.5,-127,0.5,-147); Main.ZIndex=2; corner(Main,8); stroke(Main)
+
+-- TITLEBAR
+local TBar = frame(Main,0,0,255,26,G(20,20,28))
+TBar.ZIndex=3; corner(TBar,8)
+frame(TBar,0,13,255,13,G(20,20,28)).ZIndex=3
+label(TBar,"XENO BRUTE",8,0,180,26,G(0,255,140),12)
+local MinBtn   = btn(TBar,"--",196,3,18,20,G(35,35,50),G(200,200,220))
+local CloseBtn = btn(TBar,"X", 233,3,18,20,G(160,30,30),G(255,255,255))
+
+-- CONTENT
+local C = frame(Main,0,26,255,269,G(0,0,0))
+C.BackgroundTransparency=1; C.ZIndex=3
+
+-- DISPLAY
+local Disp = Instance.new("TextLabel",C)
+Disp.Text="000000"; Disp.Size=UDim2.new(0.9,0,0,34); Disp.Position=UDim2.new(0.05,0,0,4)
+Disp.BackgroundColor3=G(10,10,14); Disp.TextColor3=G(0,255,110)
+Disp.Font=Enum.Font.Code; Disp.TextSize=24; Disp.TextStrokeTransparency=0.4
+Disp.ZIndex=4; corner(Disp,6); stroke(Disp,G(0,180,100),1)
+
+local Stat = label(C,"Aguardando...",12,42,220,12,G(100,100,120),9)
+Stat.ZIndex=4
+
+-- CPS ROW
+local cRow = frame(C,12,58,231,22)
+corner(cRow,5); stroke(cRow,G(0,140,80),1)
+label(cRow,"CPS:",4,0,26,22,G(0,200,120))
+local CPSminus = btn(cRow,"-",30,2,18,18,G(30,30,42),G(255,100,100))
+local CPSval   = label(cRow,"20",52,0,26,22,G(255,255,255),11)
+CPSval.TextXAlignment=Enum.TextXAlignment.Center
+local CPSplus  = btn(cRow,"+",80,2,18,18,G(30,30,42),G(100,255,140))
+
+-- DE ROW
+local dRow = frame(C,12,84,231,22)
+corner(dRow,5); stroke(dRow,G(0,140,80),1)
+label(dRow,"De:",4,0,22,22,G(0,200,120))
+local SNBox = Instance.new("TextBox",dRow)
+SNBox.Text="100000"; SNBox.Size=UDim2.new(0,72,0.7,0); SNBox.Position=UDim2.new(0,28,0.15,0)
+SNBox.BackgroundColor3=G(18,18,26); SNBox.TextColor3=G(255,255,255)
+SNBox.Font=Enum.Font.Code; SNBox.TextSize=10; SNBox.ClearTextOnFocus=false
+SNBox.BorderSizePixel=0; SNBox.ZIndex=5; corner(SNBox,3); stroke(SNBox,G(0,140,80),1)
+
+-- ALVO ROW
+local aRow = frame(C,12,110,231,22)
+corner(aRow,5); stroke(aRow,G(60,120,255),1)
+label(aRow,"Alvo:",4,0,28,22,G(80,160,255))
+local TCoords = label(aRow,"nao definido",34,0,90,22,G(140,140,160),9)
+local DefBtn  = btn(aRow,"DEFINIR",160,2,62,18,G(25,45,110),G(120,180,255))
+
+-- LOG
+local LogBg = frame(C,12,136,231,108,G(10,10,14))
+corner(LogBg,6); stroke(LogBg,G(0,140,80),1)
+local Scroll = Instance.new("ScrollingFrame",LogBg)
+Scroll.Size=UDim2.new(1,-4,1,-4); Scroll.Position=UDim2.new(0,2,0,2)
+Scroll.BackgroundTransparency=1; Scroll.ScrollBarThickness=3
+Scroll.CanvasSize=UDim2.new(0,0,0,0); Scroll.BorderSizePixel=0; Scroll.ZIndex=5
+local LL=Instance.new("UIListLayout",Scroll); LL.Padding=UDim.new(0,1)
+local SP=Instance.new("UIPadding",Scroll); SP.PaddingLeft=UDim.new(0,3)
+
+-- START BTN
+local StartBtn = Instance.new("TextButton",C)
+StartBtn.Text="INICIAR"; StartBtn.Size=UDim2.new(0.9,0,0,24); StartBtn.Position=UDim2.new(0.05,0,0,252)
+StartBtn.BackgroundColor3=G(0,90,58); StartBtn.TextColor3=G(180,255,210)
+StartBtn.Font=Enum.Font.Code; StartBtn.TextSize=12; StartBtn.BorderSizePixel=0; StartBtn.ZIndex=4
+corner(StartBtn,6); stroke(StartBtn)
+
+-- LOG FN
+local function Log(txt,col)
+    if not Scroll.Parent then return end
+    local l=Instance.new("TextLabel",Scroll)
+    l.Text=txt; l.Size=UDim2.new(1,-2,0,13); l.BackgroundTransparency=1
+    l.TextColor3=col or G(160,255,190); l.Font=Enum.Font.Code; l.TextSize=9
+    l.TextXAlignment=Enum.TextXAlignment.Left; l.ZIndex=6
+    local ch={}
+    for _,v in ipairs(Scroll:GetChildren()) do if v:IsA("TextLabel") then ch[#ch+1]=v end end
+    if #ch>8 then ch[1]:Destroy() end
+    task.delay(0.03,function()
+        if not Scroll.Parent then return end
+        Scroll.CanvasSize=UDim2.new(0,0,0,LL.AbsoluteContentSize.Y+4)
+        Scroll.CanvasPosition=Vector2.new(0,math.huge)
+    end)
+end
+
+-- DRAG
+do
+    local drag,ds,sp=false,nil,nil
+    TBar.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true;ds=i.Position;sp=Main.Position end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if drag and i.UserInputType==Enum.UserInputType.MouseMovement then
+            local d=i.Position-ds
+            Main.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
+        end
+    end)
+end
+
+-- MINIMIZE / CLOSE
+local mini=false
+MinBtn.MouseButton1Click:Connect(function()
+    mini=not mini; C.Visible=not mini
+    Main.Size=mini and UDim2.new(0,255,0,26) or UDim2.new(0,255,0,295)
+    MinBtn.Text=mini and "[]" or "--"
+end)
+CloseBtn.MouseButton1Click:Connect(function() Screen:Destroy() end)
+
+-- CPS
+CPSminus.MouseButton1Click:Connect(function() CPS=math.max(1,CPS-1); CPSval.Text=tostring(CPS) end)
+CPSplus.MouseButton1Click:Connect(function()  CPS=math.min(100,CPS+1); CPSval.Text=tostring(CPS) end)
+
+-- ALT PARA
+UIS.InputBegan:Connect(function(i)
+    if (i.KeyCode==Enum.KeyCode.LeftAlt or i.KeyCode==Enum.KeyCode.RightAlt) and running then
+        running=false; saveProgress(lastTried)
+        Log("[!!] Alt — guardado: "..lastTried,G(255,180,60))
+    end
+end)
+
+-- TARGET
+local function updTarget()
+    if clickX and clickY then TCoords.Text=clickX..", "..clickY; TCoords.TextColor3=G(0,255,140)
+    else TCoords.Text="nao definido"; TCoords.TextColor3=G(140,140,160) end
+end
+
+DefBtn.MouseButton1Click:Connect(function()
+    if picking then
+        picking=false; if pickConn then pickConn:Disconnect(); pickConn=nil end
+        DefBtn.Text="DEFINIR"; DefBtn.BackgroundColor3=G(25,45,110)
+        Log("[!!] Cancelado.",G(200,100,80)); return
+    end
+    picking=true; DefBtn.Text="CANCEL"; DefBtn.BackgroundColor3=G(120,40,20)
+    Log("[>>] Clica no botao do jogo...",G(255,220,60))
+    task.delay(0.3,function()
+        if not picking then return end
+        pickConn=UIS.InputBegan:Connect(function(i)
+            if not picking then if pickConn then pickConn:Disconnect(); pickConn=nil end; return end
+            if i.UserInputType==Enum.UserInputType.MouseButton1 then
+                if pickConn then pickConn:Disconnect(); pickConn=nil end
+                local p=UIS:GetMouseLocation()
+                clickX,clickY=math.floor(p.X),math.floor(p.Y)
+                picking=false; DefBtn.Text="DEFINIR"; DefBtn.BackgroundColor3=G(25,45,110)
+                updTarget(); saveTarget(clickX,clickY)
+                Log(("[OK] Alvo: %d, %d"):format(clickX,clickY),G(0,255,140))
+            end
+        end)
+    end)
+end)
+
+-- SAFEWAIT
+local function sw(s)
+    if s<=0 then return end
+    local n=math.max(1,math.ceil(s/0.05))
+    for _=1,n do if not running then return end; task.wait(s/n) end
+end
+
+-- CLICK — SEM mousemoveabs para nao minimizar
+local function doClick(x,y)
+    pcall(function()
+        VIM:SendMouseButtonEvent(x,y,0,true,game,false)
+        task.wait(0.02)
+        VIM:SendMouseButtonEvent(x,y,0,false,game,false)
+    end)
+end
+
+local function clickTarget(b)
+    if clickX and clickY then
+        doClick(clickX,clickY); return
+    end
+    if not b then return end
+    -- tenta disparar o evento directamente
+    if getconnections then
+        for _,ev in ipairs({b.MouseButton1Click,b.Activated}) do
+            local ok,cs=pcall(getconnections,ev)
+            if ok and cs then for _,c in ipairs(cs) do pcall(function()c:Fire()end) end end
+        end
+    end
+    local p=b.AbsolutePosition; local s=b.AbsoluteSize
+    doClick(math.floor(p.X+s.X*.5),math.floor(p.Y+s.Y*.5))
+end
+
+-- GET UI
+local function getUI()
+    local rs=pg:FindFirstChild("ReserverServer"); if not rs then return nil,nil end
+    local fr=rs:FindFirstChild("Frame"); if not fr then return nil,nil end
+    local jn=fr:FindFirstChild("Join"); if not jn then return nil,nil end
+    return jn:FindFirstChild("TextBox"),jn:FindFirstChild("JoinButton")
+end
+local function guiAlive() local t,b=getUI(); return t~=nil and b~=nil end
+local function findByText()
+    for _,o in ipairs(pg:GetDescendants()) do
+        if o:IsA("TextButton") and o.Visible and o.AbsoluteSize.X>0 then
+            local t=o.Text:lower()
+            if t:find("entrar") or t:find("join") then return o end
+        end
+    end
+end
+
+-- BRUTE FORCE
+local function brute()
+    running=true; StartBtn.Text="[ PARAR ]"; StartBtn.BackgroundColor3=G(110,25,25)
+    if not clickX or not clickY then Log("[!] Sem alvo — usando fallback.",G(255,180,60)) end
+    local s=math.clamp(math.floor(tonumber(SNBox.Text) or 100000),100000,999999)
+    SNBox.Text=tostring(s)
+    Log(("[>>] %d -> 999999"):format(s),G(255,255,255))
+    for code=s,999999 do
+        if not running then Log("[!!] Parado.",G(255,180,60)); break end
+        local t0=os.clock()
+        lastTried=code; saveProgress(code)
+
+        Disp.Text=("%06d"):format(code)
+        Stat.Text=("Codigo: %d | CPS: %d"):format(code,CPS)
+
+        local txt,b=getUI()
+        if not b then b=findByText() end
+        if not txt then Log("[!!] TextBox nao encontrada.",G(255,80,80)); running=false; break end
+        txt.Text=tostring(code)
+        sw(0.02); if not running then break end
+        clickTarget(b)
+        sw(0.06); if not running then break end
+
+        if not guiAlive() then
+            Disp.Text="OK "..code; Stat.Text="Codigo certo: "..code
+            Log("[OK] CODIGO -> "..code,G(0,255,140))
+            saveCode(tostring(code)); SNBox.Text=tostring(code+1)
+            running=false; break
+        end
+        local gap=(1/CPS)-(os.clock()-t0)
+        if gap>0 then sw(gap) end
+    end
+    if running then Log("[--] Concluido.",G(255,130,80)); running=false end
+    StartBtn.Text="INICIAR"; StartBtn.BackgroundColor3=G(0,90,58)
+end
+
+StartBtn.MouseButton1Click:Connect(function()
+    if running then
+        running=false; saveProgress(lastTried)
+        Log("[!!] Parado. Guardado: "..lastTried,G(255,200,60))
+    else task.spawn(brute) end
+end)
+
+-- ARRANQUE
+task.delay(0.5,function()
+    local lx,ly=loadTarget()
+    if lx and ly then clickX,clickY=lx,ly; updTarget(); Log(("Alvo: %d,%d"):format(lx,ly),G(100,180,255)) end
+    local codes=getCodes()
+    if #codes>0 then
+        for _,c in ipairs(codes) do Log("OK "..c,G(0,255,140)) end
+        local last=tonumber(codes[#codes])
+        if last and last<999999 then SNBox.Text=tostring(last+1) end
+    else
+        local p=loadProgress()
+        if p and p>100000 then SNBox.Text=tostring(p); Log("Progresso: "..p,G(180,180,80)) end
+    end
+    Log("Pronto.",G(80,200,140))
+end)
